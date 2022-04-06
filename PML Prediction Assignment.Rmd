@@ -1,0 +1,112 @@
+# PML Course Assignment : Predicting Personal Activity Performance 
+
+## Introduction
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. The Weight Lifting exercise dataset (http://groupware.les.inf.puc-rio.br/har.) is a case in point, which includes data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. The goal of this project is to produce multiple machine learning algorithms that predict the "classe" variable, which is a classifier of the manner in which the subjects did the exercise. Then, using criteria such as model speed, accuracy and interpretability, I will come to a conclusion for which Machine Learning algorithm is the best for predicting the "classe" variable.
+
+## Pre-processing/Cleaning the Data
+The first steps before we can apply the algorithms are loading, cleaning and splitting the data into training and test sets to enable cross-validation.
+
+Here, I load the training and testing data sets from the source and return the dimensions of each.
+
+```{r load}
+setwd("~/Coursera/Course 8/Coursera-Data-Science-Specialization")
+pml.training <- read.csv("~/Coursera/Course 8/Coursera-Data-Science-Specialization/pml-training.csv", header=TRUE)
+pml.testing <- read.csv("~/Coursera/Course 8/Coursera-Data-Science-Specialization/pml-testing.csv", header=TRUE)
+dim(pml.training)
+dim(pml.testing)
+```
+
+Note that both data sets have 160 columns, with 19,622 observations in training and 20 in testing.
+
+The next step is identifying columns with NA's, and removing these from the datasets.
+
+```{r rmna}
+pml.training[pml.training == ""] <- NA
+pml.testing[pml.testing== ""] <- NA
+na.sum <- colSums(is.na(pml.training))
+na.flag <- names(na.sum[na.sum>0])
+pml.training2 <- pml.training[ , !names(pml.training) %in% na.flag]
+pml.testing2 <- pml.testing[ , !names(pml.testing) %in% na.flag]
+```
+
+Also note that the first 7 variables in the datasets are either time-based or subject identifiers. As such these are also removed from the analysis as they are not applicable predictors for the problem.
+
+```{r rmf7}
+pml.training2 <- pml.training2[, -c(1:7)]
+pml.testing2 <- pml.testing2[, -c(1:7)]
+dim(pml.training2)
+dim(pml.testing2)
+```
+
+As shown above, the number of columns in the now-processed datasets is 53 with the same number of observations. The final step to pre-processing is now splitting the training dataset into training and testing datasets to enable cross-validation and estimate the out-of-sample error rate of the prediction algorithms. In this case, we have a medium sample size in the training data, so I split the data into 60% training and 40% testing. 
+
+```{r part}
+library(caret)
+set.seed(904)
+inTrain <- createDataPartition(y=pml.training2$classe,p=0.6,list = FALSE)
+training <- pml.training2[inTrain, ]
+testing <- pml.training2[-inTrain, ]
+```
+
+The training dataset is now ready for the first algorithm to be applied.
+
+## Algorithm 1 : Decision Tree
+As the variable we're aiming to predict is a factor variable, the decision tree is a good choice. It is also very interpretable, so using this as the first algorithm and plotting the data enables us to explore the trends in the data that we can build upon with more accurate but less interpretable algorithms such as boosting and random forests. Here I apply the decision tree algorithm to the training dataset and plot the final model:
+
+```{r tree}
+library(rattle)
+set.seed(904)
+TreeFit <- train(classe ~ ., method="rpart", data = training)
+print(TreeFit$finalModel)
+fancyRpartPlot(TreeFit$finalModel)
+```
+
+We can see from the above that the algorithm has identified the roll_belt, pitch_forearm, magnet_dumbbell_y and roll_forearm variables as key classification drivers for the classe variable. The diagram can be used intuitively to predict the classe variable based on these variables, but how accurate is this model? 
+
+```{r tree cm}
+set.seed(904)
+testing$classe <- as.factor(testing$classe)
+TreePred <- predict(TreeFit, newdata = testing)
+TreeCM <- confusionMatrix(TreePred, testing$classe)
+TreeCM
+```
+
+In the above I have used cross validation with the testing data set formed as part of the data pre-processing earlier. Note that the expected accuracy is only 49.38% which is pretty low.
+
+
+## Algorithm 2 : Random Forest
+The random forest algorithm is a more accurate alternative to the decision tree, but does come with the disadvantages of speed, interpretability and potential overfitting. The reason for this is because the algorithm takes multiple random samples of the training data with replacement to form and combine multiple decision trees. A majority vote is then taken and the most frequent result is the winning prediction for the classe variable. Below, I form a random forest model with 2 resampling iterations and perform cross-validation with the testing data set to find it's estimated accuracy.
+
+```{r rf}
+set.seed(904)
+RF.Fit <- train(classe ~ .,data=training,method="rf", trControl = trainControl(method="Cv",number=2))
+RF.Fit
+```
+
+```{r rf cm}
+set.seed(904)
+rfPred <- predict(RF.Fit, newdata=testing)
+rfCM <- confusionMatrix(rfPred, testing$classe)
+rfCM
+```
+
+The confusion matrix stats above show we now have a much more accurate model at 99%.
+
+
+## Algorithm 3 : Boosting with Trees
+The final algorithm I will apply is boosting with trees. This is a similar process to random forests in that multiple decision trees are formed. However, with each iteration, the boosting method calculates a weighting for variables based on errors. This then informs the next iteration to prioritize the stronger weighted variables in the prediction process. All of the iterations are then combined together to build a more complete prediction algorithm. Again I apply two resamples to this algorithm below, and let's see how this compares to random forest in accuracy vs the testing set:
+
+```{r gbm}
+set.seed(904)
+gbm.fit <- train(classe ~ .,data=training,method="gbm",verbose=FALSE, trControl = trainControl(method="Cv",number=2))
+gbm.fit
+```
+
+```{r gbm cm}
+set.seed(904)
+gbmPred <- predict(gbm.fit, newdata=testing)
+gbmCM <- confusionMatrix(gbmPred, testing$classe)
+gbmCM
+```
+
+While the estimated accuracy is again strong at 95% here, this is actually 4% worse than the random forest algorithm which is therefore the selected model of choice for this assignment.
